@@ -112,7 +112,21 @@ for epoch in range(opt.nepoch):
 	train_mse = 0.0
 	train_mse_wld = 0.0
 	timer = time.time()
+	for i, data in enumerate(tqdm(train_dataloader, 0)):
+		if len(data[0]) == 1:
+			continue
+		torch.cuda.synchronize()       
+		# 3.1.1 load inputs and targets
+		points, volume_length, gt_pca, gt_xyz = data
+		gt_pca = Variable(gt_pca, requires_grad=False).cuda()
+		points, volume_length, gt_xyz = points.cuda(), volume_length.cuda(), gt_xyz.cuda()
+		
+		#Output heatmaps
+		heatmap,heatmap_vector = group_points(gt_xyz, opt)
 
+		# points: B * 1024 * 6; target: B * 42
+		inputs_level1, inputs_level1_center = group_points(points, opt)
+		inputs_level1, inputs_level1_center = Variable(inputs_level1,	
 
 
     print("Train examples: {}".format(train_examples))
@@ -120,7 +134,7 @@ for epoch in range(opt.nepoch):
     print("Start training...")
     cudnn.benchmark = True
     classifier.cuda()
-    for epoch in range(num_epochs):
+    
         print("--------Epoch {}--------".format(epoch))
 
         # train one epoch
