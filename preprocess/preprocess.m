@@ -1,6 +1,6 @@
 % create point cloud from depth image
 % author: Liuhao Ge
-% COde Contribution:- Shazeb Ata
+% Code Contribution:- Shazeb Ata
 
 clc;clear;close all;
 
