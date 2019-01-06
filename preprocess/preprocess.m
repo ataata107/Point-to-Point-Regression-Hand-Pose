@@ -1,10 +1,9 @@
 % create point cloud from depth image
 % author: Liuhao Ge
-% Code Contribution:- Shazeb Ata
 
 clc;clear;close all;
 
-dataset_dir='../data/cvpr15_MSRAHandGestureDB/';
+dataset_dir='/home/geliuhao/CVPR15_MSRAHandGesture/cvpr15_MSRAHandGestureDB/';%'../data/cvpr15_MSRAHandGestureDB/'
 save_dir='./';
 subject_names={'P0','P1','P2','P3','P4','P5','P6','P7','P8'};
 gesture_names={'1','2','3','4','5','6','7','8','9','I','IP','L','MP','RP','T','TIP','Y'};
@@ -119,7 +118,6 @@ for sub_idx = 1:length(subject_names)
             %% 2.5 compute surface normal
             normal_k = 30;
             normals = pcnormals(ptCloud, normal_k);
-            
             normals_sampled = normals(rand_ind,:);
 
             sensorCenter = [0 0 0];
@@ -158,7 +156,6 @@ for sub_idx = 1:length(subject_names)
             sampled_idx_l1 = farthest_point_sampling_fast(hand_points_normalized_sampled, sample_num_level1)';
             other_idx = setdiff(1:SAMPLE_NUM, sampled_idx_l1);
             new_idx = [sampled_idx_l1 other_idx];
-            
             pc = pc(new_idx,:);
             % 2nd level
             sampled_idx_l2 = farthest_point_sampling_fast(pc(1:sample_num_level1,1:3), sample_num_level2)';
@@ -175,7 +172,6 @@ for sub_idx = 1:length(subject_names)
             Volume_length(frm_idx) = max_bb3d_len;
             Volume_offset(frm_idx,:) = offset;
             Volume_GT_XYZ(frm_idx,:,:) = jnt_xyz_normalized;
-            return
         end
         % 3. save files
         save([save_gesture_dir '/Point_Cloud_FPS.mat'],'Point_Cloud_FPS');

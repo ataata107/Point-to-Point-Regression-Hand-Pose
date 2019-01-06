@@ -23,13 +23,12 @@ import torch.utils.data
 import torch.nn.functional as F
 from torch.autograd import Variable
 
-from dataset import HandPointDataset
-from dataset import subject_names
-from dataset import gesture_names
-from network import PointNet_Plus
-from utils import group_points
+from dataset-point import HandPointDataset
+from dataset-point import subject_names
+from dataset-point import gesture_names
+from network-point import PointNet_Plus
+from utils-point import group_points,offset_cal
 
-from pointnet2 import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=32, help='input batch size')
@@ -80,31 +79,41 @@ logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S
 logging.info('======================================================')
 
 # 1. Load data
-train_data = HandPointDataset(root_path='../preprocess', opt=opt, train = True)	
+train_data = HandPointDataset(root_path='../preprocess', opt=opt, train = True)
 train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=opt.batchSize,
 										  shuffle=True, num_workers=int(opt.workers), pin_memory=False)
 										  
 test_data = HandPointDataset(root_path='../preprocess', opt=opt, train = False)
 test_dataloader = torch.utils.data.DataLoader(test_data, batch_size=opt.batchSize,
 										  shuffle=False, num_workers=int(opt.workers), pin_memory=False)
+										  
 print('#Train data:', len(train_data), '#Test data:', len(test_data))
-print (opt)										  
+print (opt)
 
 # 2. Define model, loss and optimizer
-classifier = PointNet2ClsSsg()
-classifier.cuda()
-print(netR)	
+netR = PointNet_Plus(opt)
+if opt.ngpu > 1:
+	netR.netR_1 = torch.nn.DataParallel(netR.netR_1, range(opt.ngpu))
+	netR.netR_2 = torch.nn.DataParallel(netR.netR_2, range(opt.ngpu))
+	netR.netR_3 = torch.nn.DataParallel(netR.netR_3, range(opt.ngpu))
+if opt.model != '':
+	netR.load_state_dict(torch.load(os.path.join(save_dir, opt.model)))
+	
+netR.cuda()
+print(netR)
 
+criterion1 = nn.MSELoss(size_average=True).cuda()
+optimizer1 = optim.Adam(netR.parameters(), lr=opt.learning_rate, betas = (0.5, 0.999), eps=1e-06)
 
-criterion = nn.MSELoss(size_average=True).cuda()
-optimizer = optim.Adam(classifier.parameters(), lr=opt.learning_rate, betas = (0.5, 0.999), eps=1e-06)
+criterion2 = nn.MSELoss(size_average=True).cuda()
+optimizer2 = optim.Adam(netR.parameters(), lr=opt.learning_rate, betas = (0.5, 0.999), eps=1e-06)
 if opt.optimizer != '':
 	optimizer.load_state_dict(torch.load(os.path.join(save_dir, opt.optimizer)))
-scheduler = lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1)								  
-									
+scheduler = lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1)
 
+# 3. Training and testing
 for epoch in range(opt.nepoch):
-    scheduler.step(epoch)
+	scheduler.step(epoch)
 	print('======>>>>> Online epoch: #%d, lr=%f, Test: %s <<<<<======' %(epoch, scheduler.get_lr()[0], subject_names[opt.test_index]))
 	# 3.1 switch to train mode
 	torch.cuda.synchronize()
@@ -112,75 +121,57 @@ for epoch in range(opt.nepoch):
 	train_mse = 0.0
 	train_mse_wld = 0.0
 	timer = time.time()
+
 	for i, data in enumerate(tqdm(train_dataloader, 0)):
 		if len(data[0]) == 1:
 			continue
 		torch.cuda.synchronize()       
 		# 3.1.1 load inputs and targets
-		points, volume_length, gt_pca, gt_xyz = data
+		points, volume_length, gt_pca, gt_xyz,jnts = data
 		gt_pca = Variable(gt_pca, requires_grad=False).cuda()
 		points, volume_length, gt_xyz = points.cuda(), volume_length.cuda(), gt_xyz.cuda()
 		
-		#Output heatmaps
-		heatmap,heatmap_vector = group_points(gt_xyz, opt)
+		#load offsets and heatmaps
+		points_htm=points[:,:,:3]
+		jnts=torch.cat((jnts,points_htm),1)
+		heatmap = offset_cal(jnts,opt)  #B*4J*1024*1
+		
 
 		# points: B * 1024 * 6; target: B * 42
 		inputs_level1, inputs_level1_center = group_points(points, opt)
-		inputs_level1, inputs_level1_center = Variable(inputs_level1,	
+		inputs_level1, inputs_level1_center = Variable(inputs_level1, requires_grad=False), Variable(inputs_level1_center, requires_grad=False)
 
+		# 3.1.2 compute output
+		optimizer.zero_grad()
+		points=points.permute(0,2,1).unsqueeze(3)
+		estimation1,estimation2 = netR(inputs_level1, inputs_level1_center,points)
+		
+		loss1 = criterion1(estimation1, heatmap)
+		loss2 = criterion2(estimation2, heatmap)
+		# 3.1.3 compute gradient and do SGD step
+		loss1.backward()
+		loss2.backward()
+		optimizer1.step()
+		optimizer2.step()
+		torch.cuda.synchronize()
+		
+		# 3.1.4 update training error
+		train_mse = train_mse + (loss1.data[0]+loss2.data[0])*len(points)/2.0
+		
+		
+		
+	# time taken
+	torch.cuda.synchronize()
+	timer = time.time() - timer
+	timer = timer / len(train_data)
+	print('==> time to learn 1 sample = %f (ms)' %(timer*1000))
 
-    print("Train examples: {}".format(train_examples))
-    print("Evaluation examples: {}".format(test_examples))
-    print("Start training...")
-    cudnn.benchmark = True
-    classifier.cuda()
-    
-        print("--------Epoch {}--------".format(epoch))
+	# print mse
+	train_mse = train_mse / len(train_data)
+	
+	print('mean-square error of 1 sample: %f, #train_data = %d' %(train_mse, len(train_data)))
+	
 
-        # train one epoch
-        classifier.train()
-        total_train_loss = 0
-        correct_examples = 0
-        for batch_idx, data in enumerate(train_dataloader, 0):
-            pointcloud, label = data
-            pointcloud = pointcloud.permute(0, 2, 1)
-            pointcloud, label = pointcloud.cuda(), label.cuda()
-
-            optimizer.zero_grad()
-            pred = classifier(pointcloud)
-
-            loss = F.nll_loss(pred, label.view(-1))
-            pred_choice = pred.max(1)[1]
-
-            loss.backward()
-            optimizer.step()
-
-            total_train_loss += loss.item()
-            correct_examples += pred_choice.eq(label.view(-1)).sum().item()
-            
-        print("Train loss: {:.4f}, train accuracy: {:.2f}%".format(total_train_loss / train_batches, correct_examples / train_examples * 100.0))
-
-        # eval one epoch
-        classifier.eval()
-        correct_examples = 0
-        for batch_idx, data in enumerate(test_dataloader, 0):
-            pointcloud, label = data
-            pointcloud = pointcloud.permute(0, 2, 1)
-            pointcloud, label = pointcloud.cuda(), label.cuda()
-
-            pred = classifier(pointcloud)
-            pred_choice = pred.max(1)[1]
-            correct = pred_choice.eq(label.view(-1)).sum()
-            correct_examples += correct.item()
-
-        print("Eval accuracy: {:.2f}%".format(correct_examples / test_examples * 100.0))
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser('Pointnet Trainer')
-    parser.add_argument('--batch_size',                type=int,   help='batch size', default=8)
-    parser.add_argument('--num_epochs',                type=int,   help='number of epochs', default=10)
-    parser.add_argument('--log_directory',             type=str,   help='directory to save checkpoints and summaries', default='')
-    parser.add_argument('--checkpoint_path',           type=str,   help='path to a specific checkpoint to load', default='')
-    args = parser.parse_args()
-    train(args)
-    
+	torch.save(netR.state_dict(), '%s/netR_%d.pth' % (save_dir, epoch))
+	torch.save(optimizer.state_dict(), '%s/optimizer_%d.pth' % (save_dir, epoch))
+	
