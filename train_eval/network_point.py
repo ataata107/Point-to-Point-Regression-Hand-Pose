@@ -45,13 +45,15 @@ def pointnetfc(xyz1, xyz2, points1, points2):
 	xyz1=xyz1.squeeze(3)  #B*3*N1
 	if xyz2 is not None:
 		xyz2=xyz2.squeeze(3)		#B*3*N2
-		xyz2 = xyz2.permute(0, 2, 1)
-	points1=points1.squeeze(3)  #B*C1*N1
+		xyz2 = xyz2.permute(0, 2, 1)  #B*N2*3
+	if points1 is not None:
+	
+		points1=points1.squeeze(3)  #B*C1*N1
 	points2=points2.squeeze(3)  #B*C2*N2
 	
-	xyz1 = xyz1.permute(0, 2, 1)
+	xyz1 = xyz1.permute(0, 2, 1) #B*N1*3
 	
-	points2 = points2.permute(0, 2, 1)
+	points2 = points2.permute(0, 2, 1) #B*N2*C2
 	B, N, C = xyz1.shape
 	_, S, _ = xyz2.shape
 	if S == 1:
@@ -105,7 +107,7 @@ class PointNet_Plus(nn.Module):
         )
         self.netR_11 = nn.Sequential(
             # B*INPUT_FEATURE_NUM*sample_num_level1*knn_K
-            nn.Conv2d(3+128+opt.JOINT_NUM*4, nstates_plus_1[0], kernel_size=(1, 1)),
+            nn.Conv2d(6+128+opt.JOINT_NUM*4, nstates_plus_1[0], kernel_size=(1, 1)),
             nn.BatchNorm2d(nstates_plus_1[0]),
             nn.ReLU(inplace=True),
             # B*64*sample_num_level1*knn_K
@@ -207,6 +209,7 @@ class PointNet_Plus(nn.Module):
     def forward(self, x, y,x00):
 		######################HPN-1##########################################################################################3
         # x: B*INPUT_FEATURE_NUM*sample_num_level1*knn_K, y: B*3*sample_num_level1*1
+        B = len(x)
         x10 = self.netR_1(x)
         # B*128*sample_num_level1*1
         x11 = torch.cat((y, x10),1).squeeze(-1)
@@ -223,7 +226,10 @@ class PointNet_Plus(nn.Module):
         
         x30 = self.netR_3(x21)
         # B*1024*1*1
-        x20=pointnetfc(inputs_level2_center,None,x20,x30)
+		
+        
+        x3_center = torch.zeros(B, 3, 1,1)  # # B*3*1*1
+        x20=pointnetfc(inputs_level2_center,x3_center,x20,x30)
         x20=self.netR_4(x20)
         x20=x20.unsqueeze(3)
         #B*256*sample_num_level2*1
@@ -239,8 +245,10 @@ class PointNet_Plus(nn.Module):
         ## B*4J*1024*1
         #################################HPN-2##########################################################################################3
         x=torch.cat((x00,heatmap_1,x01),1)
-        x=group_points_3(x,opt)
-        # x: B*(3+128+4J)*sample_num_level1*knn_K, y: B*3*sample_num_level1*1
+		## B*(6+4J+128)*1024*1
+        x = x.squeeze(3).permute(0,2,1)  ## B*1024*(6+4J+128)
+        x,y=group_points_3(x,opt)
+        # x: B*(6+128+4J)*sample_num_level1*knn_K, y: B*3*sample_num_level1*1
         x10 = self.netR_11(x)
         # B*128*sample_num_level1*1
         x11 = torch.cat((y, x10),1).squeeze(-1)
@@ -257,7 +265,7 @@ class PointNet_Plus(nn.Module):
         
         x30 = self.netR_3(x21)
         # B*1024*1*1
-        x20=pointnetfc(inputs_level2_center,None,x20,x30)
+        x20=pointnetfc(inputs_level2_center,x3_center,x20,x30)
         x20=self.netR_4(x20)
         x20=x20.unsqueeze(3)
         #B*256*sample_num_level2*1
@@ -265,11 +273,11 @@ class PointNet_Plus(nn.Module):
         x10=self.netR_5(x10)
         x10=x10.unsqueeze(3)
         #B*128*sample_num_level1*1
-        x00=pointnetfc(x00,y,None,x10)
-        x00=self.netR_5(x00)
-        x00=x00.unsqueeze(3)
+        x01=pointnetfc(x[:,:3,:,:],y,None,x10)
+        x01=self.netR_5(x01)
+        x01=x01.unsqueeze(3)
         #B*128*1024*1
-        heatmap_2 = netR_FC1(x00)
+        heatmap_2 = netR_FC1(x01)
         ## B*4J*1024*1
 		
         return heatmap_1,heatmap_2

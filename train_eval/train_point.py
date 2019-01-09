@@ -141,12 +141,12 @@ for epoch in range(opt.nepoch):
 
 		# points: B * 1024 * 6; target: B * 42
 		inputs_level1, inputs_level1_center = group_points(points, opt)
-		inputs_level1, inputs_level1_center = Variable(inputs_level1, requires_grad=False), Variable(inputs_level1_center, requires_grad=False)
+		inputs_level1, inputs_level1_center = Variable(inputs_level1, requires_grad=False), Variable(inputs_level1_center, requires_grad=False) #inputs_level1: B*INPUT_FEATURE_NUM*sample_num_level1*knn_K, inputs_level1_center: B*3*sample_num_level1*1
 
 		# 3.1.2 compute output
 		optimizer1.zero_grad()
 		optimizer2.zero_grad()
-		points=points.permute(0,2,1).unsqueeze(3)
+		points=points.permute(0,2,1).unsqueeze(3) # points: B * 6 * 1024 * 1
 		estimation1,estimation2 = netR(inputs_level1, inputs_level1_center,points)
 		
 		loss1 = criterion1(estimation1, heatmap)
