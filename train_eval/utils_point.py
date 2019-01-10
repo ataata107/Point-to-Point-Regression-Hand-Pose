@@ -52,7 +52,7 @@ def offset_cal(points,opt):
         heatmap = 1-dist/opt.ball_radius   # B*21*64*1
         vector = offset/dist.expand(cur_train_size,opt.JOINT_NUM,opt.knn_K,3) # B*21*64*3
         heatmap = torch.cat((heatmap,vector),3)   # B*21*64*4
-        heatmap_1 = torch.zeros(cur_train_size,opt.JOINT_NUM,1024,4) # B*21*1024*4
+        heatmap_1 = torch.zeros(cur_train_size,opt.JOINT_NUM,1024,4).cuda() # B*21*1024*4
         heatmap_1 = heatmap_1.scatter_(2, idx_group_l1_long_long, heatmap) #heatmap_1 = B*21*1024*4
         #heatmap_1[:,idx_group_l1_long_long,idx_group_l1_long_long,:] = heatmap #heatmap_1 = B*21*1024*4
 		

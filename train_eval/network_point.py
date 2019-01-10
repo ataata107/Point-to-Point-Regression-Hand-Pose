@@ -160,11 +160,11 @@ class PointNet_Plus(nn.Module):
         )
         self.netR_4 = nn.Sequential(
             # B*1280*sample_num_level2
-            nn.Conv1d(1280, 256, kernel_size=(1, 1)),
+            nn.Conv1d(1280, 256, 1),
             nn.BatchNorm1d(256),
             nn.ReLU(inplace=True),
             # B*256*sample_num_level2
-            nn.Conv1d(256, 256, kernel_size=(1, 1)),
+            nn.Conv1d(256, 256, 1),
             nn.BatchNorm1d(256),
             nn.ReLU(inplace=True),
             # B*256*sample_num_level2
@@ -172,11 +172,11 @@ class PointNet_Plus(nn.Module):
         )
         self.netR_5 = nn.Sequential(
             # B*384*sample_num_level1
-            nn.Conv1d(384, 256, kernel_size=(1, 1)),
+            nn.Conv1d(384, 256, 1),
             nn.BatchNorm1d(256),
             nn.ReLU(inplace=True),
             # B*256*sample_num_level1
-            nn.Conv1d(256, 128, kernel_size=(1, 1)),
+            nn.Conv1d(256, 128, 1),
             nn.BatchNorm1d(128),
             nn.ReLU(inplace=True),
             # B*128*sample_num_level1
@@ -184,15 +184,15 @@ class PointNet_Plus(nn.Module):
         )
         self.netR_6 = nn.Sequential(
             # B*128*1024
-            nn.Conv1d(128, 128, kernel_size=(1, 1)),
+            nn.Conv1d(128, 128, 1),
             nn.BatchNorm1d(128),
             nn.ReLU(inplace=True),
             # B*128*1024
-            nn.Conv1d(128, 128, kernel_size=(1, 1)),
+            nn.Conv1d(128, 128, 1),
             nn.BatchNorm1d(128),
             nn.ReLU(inplace=True),
             # B*128*1024
-            nn.Conv1d(128, 128, kernel_size=(1, 1)),
+            nn.Conv1d(128, 128, 1),
             nn.BatchNorm1d(128),
             nn.ReLU(inplace=True),
             # B*128*1024
@@ -206,7 +206,7 @@ class PointNet_Plus(nn.Module):
             # B*4J*1024*1
 		)
         
-    def forward(self, x, y,x00):
+    def forward(self, x, y,x00,opt):
 		######################HPN-1##########################################################################################3
         # x: B*INPUT_FEATURE_NUM*sample_num_level1*knn_K, y: B*3*sample_num_level1*1
         B = len(x)
@@ -226,22 +226,27 @@ class PointNet_Plus(nn.Module):
         
         x30 = self.netR_3(x21)
         # B*1024*1*1
+        #print("x30",x30.shape)
 		
         
         x3_center = torch.zeros(B, 3, 1,1)  # # B*3*1*1
         x20=pointnetfc(inputs_level2_center,x3_center,x20,x30)
+
+        #print(x20.shape)
         x20=self.netR_4(x20)
         x20=x20.unsqueeze(3)
+        #print("x20",x20.shape)
         #B*256*sample_num_level2*1
         x10=pointnetfc(y,inputs_level2_center,x10,x20)
+        #print("x10",x10.shape)
         x10=self.netR_5(x10)
         x10=x10.unsqueeze(3)
         #B*128*sample_num_level1*1
         x01=pointnetfc(x00[:,:3,:,:],y,None,x10)
-        x01=self.netR_5(x01)
+        x01=self.netR_6(x01)
         x01=x01.unsqueeze(3)
         #B*128*1024*1
-        heatmap_1 = netR_FC1(x01)
+        heatmap_1 = self.netR_FC1(x01)
         ## B*4J*1024*1
         #################################HPN-2##########################################################################################3
         x=torch.cat((x00,heatmap_1,x01),1)
@@ -273,11 +278,12 @@ class PointNet_Plus(nn.Module):
         x10=self.netR_5(x10)
         x10=x10.unsqueeze(3)
         #B*128*sample_num_level1*1
-        x01=pointnetfc(x[:,:3,:,:],y,None,x10)
-        x01=self.netR_5(x01)
+        
+        x01=pointnetfc(x00[:,:3,:,:],y,None,x10)
+        x01=self.netR_6(x01)
         x01=x01.unsqueeze(3)
         #B*128*1024*1
-        heatmap_2 = netR_FC1(x01)
+        heatmap_2 = self.netR_FC1(x01)
         ## B*4J*1024*1
-		
+        #print("heatmap",heatmap_1.shape,heatmap_2.shape)
         return heatmap_1,heatmap_2

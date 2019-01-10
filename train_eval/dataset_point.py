@@ -89,8 +89,8 @@ class HandPointDataset(data.Dataset):
         tmp_demean = self.gt_xyz - tmp
         self.gt_pca = torch.mm(tmp_demean, self.PCA_coeff)
 
-        self.PCA_coeff = self.PCA_coeff.transpose(0, 1).cpu()
-        self.PCA_mean = self.PCA_mean.cpu()
+        self.PCA_coeff = self.PCA_coeff.transpose(0, 1).cuda()
+        self.PCA_mean = self.PCA_mean.cuda()
 
     def __getitem__(self, index):
         return self.point_clouds[index, :, :], self.volume_length[index], self.gt_pca[index, :], self.gt_xyz[index, :],self.jnts[index,:,:]

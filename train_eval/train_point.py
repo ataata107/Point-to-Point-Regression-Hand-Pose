@@ -35,7 +35,7 @@ parser.add_argument('--batchSize', type=int, default=32, help='input batch size'
 parser.add_argument('--workers', type=int, default=0, help='number of data loading workers')
 parser.add_argument('--nepoch', type=int, default=60, help='number of epochs to train for')
 parser.add_argument('--ngpu', type=int, default=1, help='# GPUs')
-parser.add_argument('--main_gpu', type=int, default=-1, help='main GPU id') # CUDA_VISIBLE_DEVICES=0 python train.py
+parser.add_argument('--main_gpu', type=int, default=0, help='main GPU id') # CUDA_VISIBLE_DEVICES=0 python train.py
 
 parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate at t=0')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum (SGD only)')
@@ -99,26 +99,26 @@ if opt.ngpu > 1:
 if opt.model != '':
 	netR.load_state_dict(torch.load(os.path.join(save_dir, opt.model)))
 	
-netR.cpu()
+netR.cuda()
 print(netR)
 
-criterion1 = nn.MSELoss(size_average=True).cpu()
+criterion1 = nn.MSELoss(size_average=True).cuda()
 optimizer1 = optim.Adam(netR.parameters(), lr=opt.learning_rate, betas = (0.5, 0.999), eps=1e-06)
 
-criterion2 = nn.MSELoss(size_average=True).cpu()
-optimizer2 = optim.Adam(netR.parameters(), lr=opt.learning_rate, betas = (0.5, 0.999), eps=1e-06)
+#criterion2 = nn.MSELoss(size_average=True).cpu()
+#optimizer2 = optim.Adam(netR.parameters(), lr=opt.learning_rate, betas = (0.5, 0.999), eps=1e-06)
 if opt.optimizer != '':
 	optimizer.load_state_dict(torch.load(os.path.join(save_dir, opt.optimizer)))
 scheduler1 = lr_scheduler.StepLR(optimizer1, step_size=50, gamma=0.1)
-scheduler2 = lr_scheduler.StepLR(optimizer2, step_size=50, gamma=0.1)
+#scheduler2 = lr_scheduler.StepLR(optimizer2, step_size=50, gamma=0.1)
 
 # 3. Training and testing
 for epoch in range(opt.nepoch):
 	scheduler1.step(epoch)
-	scheduler2.step(epoch)
+	#scheduler2.step(epoch)
 	print('======>>>>> Online epoch: #%d, lr=%f, Test: %s <<<<<======' %(epoch, scheduler1.get_lr()[0], subject_names[opt.test_index]))
 	# 3.1 switch to train mode
-	#torch.cuda.synchronize()
+	torch.cuda.synchronize()
 	netR.train()
 	train_mse = 0.0
 	train_mse_wld = 0.0
@@ -127,16 +127,18 @@ for epoch in range(opt.nepoch):
 	for i, data in enumerate(tqdm(train_dataloader, 0)):
 		if len(data[0]) == 1:
 			continue
-		#torch.cuda.synchronize()       
+		torch.cuda.synchronize()       
 		# 3.1.1 load inputs and targets
 		points, volume_length, gt_pca, gt_xyz,jnts = data
-		gt_pca = Variable(gt_pca, requires_grad=False).cpu()
-		points, volume_length, gt_xyz = points.cpu(), volume_length.cpu(), gt_xyz.cpu()
+		gt_pca = Variable(gt_pca, requires_grad=False).cuda()
+		points, volume_length, gt_xyz,jnts = points.cuda(), volume_length.cuda(), gt_xyz.cuda(),jnts.cuda()
 		
 		#load offsets and heatmaps
 		points_htm=points[:,:,:3]
 		jnts=torch.cat((jnts,points_htm),1)
 		heatmap = offset_cal(jnts,opt)  #B*4J*1024*1
+
+		heatmap = torch.cat((heatmap,heatmap),1)
 		
 
 		# points: B * 1024 * 6; target: B * 42
@@ -145,21 +147,23 @@ for epoch in range(opt.nepoch):
 
 		# 3.1.2 compute output
 		optimizer1.zero_grad()
-		optimizer2.zero_grad()
+		#optimizer2.zero_grad()
 		points=points.permute(0,2,1).unsqueeze(3) # points: B * 6 * 1024 * 1
-		estimation1,estimation2 = netR(inputs_level1, inputs_level1_center,points)
+		estimation1,estimation2 = netR(inputs_level1, inputs_level1_center,points,opt)
+
+		estimation = torch.cat((estimation1,estimation2),1)
 		
-		loss1 = criterion1(estimation1, heatmap)
-		loss2 = criterion2(estimation2, heatmap)
+		loss1 = criterion1(estimation, heatmap)
+		#loss2 = criterion2(estimation2, heatmap)
 		# 3.1.3 compute gradient and do SGD step
 		loss1.backward()
-		loss2.backward()
+		#loss2.backward()
 		optimizer1.step()
-		optimizer2.step()
-		#torch.cuda.synchronize()
+		#optimizer2.step()
+		torch.cuda.synchronize()
 		
 		# 3.1.4 update training error
-		train_mse = train_mse + (loss1.data[0]+loss2.data[0])*len(points)/2.0
+		train_mse = train_mse + (loss1.data[0])*len(points)
 		
 		
 		
